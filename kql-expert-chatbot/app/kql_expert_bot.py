@@ -182,11 +182,16 @@ Exhaustively cover all information given above, especially covering all technica
 class OutputBot(AzureChatOpenAITool):
     def _get_system_prompt(self):
         return """
-You are a bot designed to develop a KQL expert chatbot which has a TableSchema [TableSchema]. 
+You are a bot designed to develop a KQL expert chatbot defined by a TableSchema [TableSchema] and a set of Configurations [Configuration]. 
 
-The TableSchema is a set of key-value pairs, where the keys are table names (which you can think of as KQL tables), values are TableSchema of that table. We want the TableSchema section names to be distinct from each other. 
+The TableSchema is a set of key-value pairs, where the keys are table names (which you can think of as KQL tables), values are schema of that table. We want the TableSchema section names to be distinct from each other. 
 
-Always return the updated values by logically combining information from the user's input with the existing information to the current values. Only exclude information already given to you in the current values when the user specifically instructs to do so.
+Always return the updated values by logically combining information from the user's input with the existing information. Only exclude information already given to you in the current values when the user specifically instructs to do so.
+
+[Configuration] is a set of configurations that are used to connect to a Kusto cluster.  
+
+You will facilitate the user's interaction with the chatbot. Please ensure to always follow the given output format. Please ensure to always give the user a response, if you are not sure how to process their input please say so.
+
 """
     def _get_user_prompt(self):
         return """
@@ -198,6 +203,9 @@ The chatbot definition is as follows:
 
 [TableSchema]
 {TableSchema}
+
+[Configuration]
+{Configuration}
 
 The following is the chat history. Messages from the bot are denoted by 'Bot:' and messages from the user are denoted by 'User:'. Based on the user's last input, please respond as described below.
 
@@ -223,11 +231,16 @@ Based on the above chatbot definition and the user's input, output the response 
 class CommandChooser(AzureChatOpenAITool):
     def _get_system_prompt(self):
         return """
-You are a bot designed to develop a KQL expert chatbot which has a TableSchema [TableSchema]. 
+You are a bot designed to develop a KQL expert chatbot defined by a TableSchema [TableSchema] and a set of Configurations [Configuration]. 
 
-The TableSchema is a set of key-value pairs, where the keys are table names (which you can think of as KQL tables), values are TableSchema of that table. We want the TableSchema section names to be distinct from each other. 
+The TableSchema is a set of key-value pairs, where the keys are table names (which you can think of as KQL tables), values are schema of that table. We want the TableSchema section names to be distinct from each other. 
 
-Always return the updated values by logically combining information from the user's input with the existing information to the current values. Only exclude information already given to you in the current values when the user specifically instructs to do so.
+Always return the updated values by logically combining information from the user's input with the existing information. Only exclude information already given to you in the current values when the user specifically instructs to do so.
+
+[Configuration] is a set of configurations that are used to connect to a Kusto cluster.  
+
+You will facilitate the user's interaction with the chatbot. Please ensure to always follow the given output format. Please ensure to always give the user a response, if you are not sure how to process their input please say so.
+
     """
 
     def _get_user_prompt(self):
@@ -236,7 +249,15 @@ A user has given the following instruction to change the logic of the chatbot. T
 
 Does the utterance require us to update TableSchema? If yes, then invoke “Update TableSchema (defined below) with the part [U-TableSchema] of the utterance [U] that is relevant to updating the [TableSchema]. 
 
-“Update SCHEMA”, with the current [TableSchema] and part of the utterance [U-TableSchema] is done as follows: Split the utterance [U-TableSchema]  into sentences. For each sentence [S], if [S] corresponds to a section that is already in the [TableSchema], merely update the value corresponding to that section with the utterance. Otherwise, choose a new section name [N], and add the sentence [S] in the value corresponding to that section. 
+Does the utterance require us to update Configuration? If yes, then invoke “Update Configuration (defined below) with the part [U-Configuration] of the utterance [U] that is relevant to updating the [Configuration]. 
+
+Note that you can decide to invoke none or one of the updates  “Update KB” and “Update Note that you can decide to invoke none, one or more of the updates  “Update KB”, “Update Logic” and “Update Variables”.
+
+“Update TableSchema”, with the current [TableSchema] and part of the utterance [U-TableSchema] is done as follows: Split the utterance [U-TableSchema]  into sentences. For each sentence [S], if [S] corresponds to a section that is already in the [TableSchema], merely update the value corresponding to that section with the utterance. Otherwise, choose a new section name [N], and add the sentence [S] in the value corresponding to that section.     
+
+“Update Configuration” with the current set of Configuration [Configuration] and part of the utterance [U-Configuration] is done as follows. Split the utterance [U-Configuration] into sentences.  
+
+For each sentence [S], if [S] corresponds to config [C] that is a part of [Configuration], then update its value.  
 
 In addition, if the user asks you to show the contents of the [TableSchema] oblige them. 
 
@@ -244,6 +265,9 @@ If the user asks any thing else other than the above mentioned kind of utterance
 
 The current value of the knowledge base, [TableSchema] is below. Modify the below [TableSchema] to include changes if "Update TableSchema" is required. If no changes are required, please return the current value of [TableSchema] without any change.
 {TableSchema}
+
+The current value of the knowledge base, [Configuration] is below. Modify the below [Configuration] to include changes if "Update Configuration" is required. If no changes are required, please return the current value of [Configuration] without any change.
+{Configuration}
 
 Please ensure to retain all the information in the above values, while only making modifications and additions to incorporate the user's input. Only exclude contents from the current values if the user specifically instructs to.
 The user's instruction is: {user_input}
@@ -254,4 +278,7 @@ summary: <one-line summary of changes>
 
 [TableSchema]
 <contents of TableSchema>
+
+[Configuration]
+<contents of Configuration>
     """
