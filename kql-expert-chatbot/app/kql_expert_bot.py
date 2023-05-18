@@ -142,8 +142,8 @@ class KqlExpertBotTool(PbyCEngine):
             if '[Configuration]' in line or 'Configuration:' in line:
                 Configuration_index = idx
 
-        TableSchema = '\n'.join(output[TableSchemas_index + 1:TableSchemas_index])
-        Configuration = '\n'.join(output[Configuration_index + 1:Configuration_index])
+        TableSchema = '\n'.join(output[TableSchemas_index + 1:Configuration_index])
+        Configuration = '\n'.join(output[Configuration_index + 1:])
         return change_summary, TableSchema, Configuration
     
 class TableSchema(PbyCRepresentation):
@@ -182,13 +182,13 @@ Exhaustively cover all information given above, especially covering all technica
 class OutputBot(AzureChatOpenAITool):
     def _get_system_prompt(self):
         return """
-You are a bot designed to develop a KQL expert chatbot defined by a TableSchema [TableSchema] and a set of Configurations [Configuration]. 
+You are a bot designed to develop a KQL expert chatbot defined by a Table Schema [TableSchema] and a set of Configurations [Configuration]. 
 
-The TableSchema is a set of key-value pairs, where the keys are table names (which you can think of as KQL tables), values are schema of that table. We want the TableSchema section names to be distinct from each other. 
+The Table Schema is a set of key-value pairs, where the keys are table names (which you can think of as KQL tables), values are schema of that table. We want the TableSchema section names to be distinct from each other. 
 
 Always return the updated values by logically combining information from the user's input with the existing information. Only exclude information already given to you in the current values when the user specifically instructs to do so.
 
-[Configuration] is a set of configurations that are used to connect to a Kusto cluster.  
+[Configuration] is a set of key-value pairs that are used to connect to a Kusto cluster.  
 
 You will facilitate the user's interaction with the chatbot. Please ensure to always follow the given output format. Please ensure to always give the user a response, if you are not sure how to process their input please say so.
 
@@ -237,7 +237,7 @@ The TableSchema is a set of key-value pairs, where the keys are table names (whi
 
 Always return the updated values by logically combining information from the user's input with the existing information. Only exclude information already given to you in the current values when the user specifically instructs to do so.
 
-[Configuration] is a set of configurations that are used to connect to a Kusto cluster.  
+[Configuration] is a set of set of key-value pairs that are used to connect to a Kusto cluster. It should always have the keys with the names "KustoCluster, Database, Service Prinicpal Id, Service Principal Secret and Tenant Id" only. These keys should initialized with blank strings.
 
 You will facilitate the user's interaction with the chatbot. Please ensure to always follow the given output format. Please ensure to always give the user a response, if you are not sure how to process their input please say so.
 
@@ -251,11 +251,11 @@ Does the utterance require us to update TableSchema? If yes, then invoke “Upda
 
 Does the utterance require us to update Configuration? If yes, then invoke “Update Configuration (defined below) with the part [U-Configuration] of the utterance [U] that is relevant to updating the [Configuration]. 
 
-Note that you can decide to invoke none or one of the updates  “Update KB” and “Update Note that you can decide to invoke none, one or more of the updates  “Update KB”, “Update Logic” and “Update Variables”.
+Note that you can decide to invoke none or one of the updates  “Update TableSchema” and “Update Configuration".
 
 “Update TableSchema”, with the current [TableSchema] and part of the utterance [U-TableSchema] is done as follows: Split the utterance [U-TableSchema]  into sentences. For each sentence [S], if [S] corresponds to a section that is already in the [TableSchema], merely update the value corresponding to that section with the utterance. Otherwise, choose a new section name [N], and add the sentence [S] in the value corresponding to that section.     
 
-“Update Configuration” with the current set of Configuration [Configuration] and part of the utterance [U-Configuration] is done as follows. Split the utterance [U-Configuration] into sentences.  
+“Update Configuration” with the current set of Configuration [Configuration] and part of the utterance [U-Configuration] is done as follows. Split the utterance [U-Configuration] into sentences. For each sentence [S], if [S] corresponds to a section that is already in the [Configuration], merely update the value corresponding to that section with the utterance. Otherwise, choose a new section name [N], and add the sentence [S] in the value corresponding to that section. 
 
 For each sentence [S], if [S] corresponds to config [C] that is a part of [Configuration], then update its value.  
 
