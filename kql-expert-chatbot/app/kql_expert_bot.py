@@ -62,10 +62,10 @@ class KqlExpertBotTool(PbyCEngine):
             user_input=text
             )
 
-        change_summary, kb, logic, variables = self.process_output(cmd)
-        print(change_summary, kb, logic, variables)
-        self._project.representations["TableSchema"].text = kb
-        self._project.representations["Configuration"].text = logic
+        change_summary, TableSchema, Configuration = self.process_output(cmd)
+        print(change_summary,TableSchema, Configuration)
+        self._project.representations["TableSchema"].text = TableSchema
+        self._project.representations["Configuration"].text = Configuration
 
         await self._progress(
             Response(
@@ -81,8 +81,8 @@ class KqlExpertBotTool(PbyCEngine):
 
         tool = OutputBot(credentials=self._credentials)
         output = await tool.run(
-            KB=self._project.representations["TableSchema"].text,
-            Logic=self._project.representations["Configuration"].text,
+            TableSchema=self._project.representations["TableSchema"].text,
+            Configuration=self._project.representations["Configuration"].text,
             chat_history=chat_history,
             user_input=text)
         
