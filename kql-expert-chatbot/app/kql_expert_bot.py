@@ -6,73 +6,93 @@ from pbyc.tools.file import FileTool
 from pbyc.tools import PbyCTool
 from pbyc.types import Representation
 from pbyc.types import ChangedRepresentation, Representation, Response, ChatMessage
+from azure.kusto.data import KustoClient, KustoConnectionStringBuilder
+from azure.kusto.data.exceptions import KustoServiceError
 import aiohttp
 import tiktoken
+import json
 
 class KqlExpertBotTool(PbyCEngine):
     def _get_representations(self):
-        return [SchemaRep()]
+        return [SchemaRep(), ConfigRep()]
 
     def get_tokensize(self, text):
         enc = tiktoken.encoding_for_model('text-davinci-003')
         return len(enc.encode(text))
     
     async def _take_utterance(self, text:str, **kwargs):
-        files = kwargs.get("files", [])
-        if files and len(files) > 0:
-            await self._progress(
-                Response(
-                    type="thought",
-                    message="Processing uploaded files",
-                    project=self._project
-                ))
-            schema = ''
-            for file in files:
-                async with aiohttp.ClientSession() as session:
-                    async with session.get(file.url) as response:
-                        filepath = '/tmp/' + file.name
-                        if response.status == 200:
-                            with open(filepath, 'wb') as f:
-                                while True:
-                                    chunk = await response.content.read(1024)  # Adjust chunk size as needed
-                                    if not chunk:
-                                        break
-                                    f.write(chunk)
-                            print(f"File downloaded and saved to {filepath}")
-                        else:
-                            raise Exception(f'File download response: {resp.status} - {resp.reason}')
-                        fileTool = FileTool()
-                        fileData = await fileTool.run(
-                            file=filepath
-                        )
-                        schema += '\n' + await self.process_document_with_llm(fileData)
-            self._project.representations["schema"].text += '\n' + schema
-            await self._progress(Response(
+        tool = CommandChooser(credentials=self._credentials)
+        cmd = await tool.run(
+            SCHEMA=self._project.representations["schema"].text,
+            CONFIG=self._project.representations["config"].text,
+            user_input=text
+        )
+
+        change_summary, config = self.process_output(cmd)
+        if config != "":
+            self._project.representations["config"].text = config
+            configs = json.loads(config)
+
+            schema_from_kusto = []
+
+            if configs["KUSTO_CLUSTER_URL"] != "" and configs["KUSTO_DATABASE_NAME"] != "" and configs["TENANT_ID"] != "" and configs["SERVICE_CLIENT_ID"] != "" and configs["SERVICE_CLIENT_SECRET"] != "" :
+                schema_from_kusto = self.get_schema_from_kusto(configs)
+
+            if schema_from_kusto:
+                schema = schema_from_kusto
+                self._project.representations["schema"].text = str(schema)
+        
+
+        await self._progress(
+            Response(
                 type="output",
-                message="Ingested the data and updated the schema!",
+                message=change_summary,
                 project=self._project
             ))
-            return "Ingested the data and updated the schema!"
-
-        else:
-            tool = CommandChooser(credentials=self._credentials)
-            cmd = await tool.run(
-                SCHEMA=self._project.representations["schema"].text,
-                user_input=text
-            )
-
-            change_summary, schema = self.process_output(cmd)
-            print(change_summary, schema)
-            self._project.representations["schema"].text = schema
-
-            await self._progress(
-                Response(
-                    type="output",
-                    message=change_summary,
-                    project=self._project
-                ))
-            return change_summary
+        return change_summary + "\n[Config]\n" + config
     
+    def get_schema_from_kusto(self, configs:dict):
+
+        cluster = configs["KUSTO_CLUSTER_URL"]  # Replace with your cluster URL
+        database = configs["KUSTO_DATABASE_NAME"]  # Replace with your database name
+        authority_id = configs["TENANT_ID"]  # Replace with your authority ID (e.g., organizations)
+        client_id = configs["SERVICE_CLIENT_ID"]  # Replace with your service principal client ID
+        client_secret = configs["SERVICE_CLIENT_SECRET"]  # Replace with your service principal client secret
+
+        kcsb = KustoConnectionStringBuilder.with_aad_application_key_authentication(
+            cluster, client_id, client_secret, authority_id
+        )
+
+        schemas = dict()
+
+        try:
+            client = KustoClient(kcsb)
+            query = ".show tables"
+            response = client.execute(database, query)
+            tables = []
+            
+            # Process the response
+            for row in response.primary_results[0]:
+                tables.append(row["TableName"])
+
+            print("#################Tables loaded##############")
+            print(f"Tables: {tables}")
+
+            for table in tables:
+                schemaQuery = ".show table {0} cslschema".format(table)
+                intermediateResponse = client.execute(database, schemaQuery)
+                for row in intermediateResponse.primary_results[0]:
+                    schemas[table] = row["Schema"]
+                
+
+            print(f"Schemas: {schemas}")
+                
+        except KustoServiceError as error:
+            print(f"Kusto service error occurred: {error}")
+
+        return schemas
+
+
     async def _get_output(self, text:str, **kwargs):
 
         chat_history = kwargs.get("chat_history", [])
@@ -80,6 +100,7 @@ class KqlExpertBotTool(PbyCEngine):
         tool = OutputBot(credentials=self._credentials)
         output = await tool.run(
             SCHEMA=self._project.representations["schema"].text,
+            CONFIG=self._project.representations["config"].text,
             chat_history=chat_history,
             user_input=text)
         
@@ -113,32 +134,25 @@ class KqlExpertBotTool(PbyCEngine):
                 project=self._project
             ))
 
-    async def process_document_with_llm(self, kb):
-        """
-        Converts knowledge from documents into a knowledge base sections.
-        """
-        re_kb = kb
-        out_kb = ''
-        textLLM = HtmlToKB(credentials=self._credentials)
-        while self.get_tokensize(re_kb) > 3000:
-            re_kbp = re_kb[:10000]
-            re_kb = re_kb[10000:]
-            out_kb += await textLLM.run(website_data=re_kbp)
-
-        out_kb += await textLLM.run(website_data=re_kb)
-        kb = out_kb 
-        return kb
-
     def process_output(self, output):
         output = output.split('\n')
+        print(output)
+        config_index_prev = -1
+        config_index = -1
         for idx, line in enumerate(output):
             if 'summary' in line:
                 change_summary = line.split(':')[1].strip()
-            if '[SCHEMA]' in line or 'SCHEMA:' in line:
-                schema_index = idx
+            elif '[CONFIG]' in line or 'CONFIG:' in line:
+                config_index_prev = idx
+            elif 'KUSTO_CLUSTER_URL' in line:
+                config_index = idx
 
-        schema = '\n'.join(output[schema_index + 1:])
-        return change_summary, schema
+        config = ""
+        if config_index_prev != -1:
+            config = '\n'.join(output[config_index_prev + 1:])
+        if config_index != -1:
+            config = '\n'.join(output[config_index:])
+        return change_summary, config
     
 class SchemaRep(PbyCRepresentation):
     def _get_initial_values(self):
@@ -147,36 +161,29 @@ class SchemaRep(PbyCRepresentation):
             text="",
             type="md"
         )
-
-class HtmlToKB(AzureChatOpenAITool):
-    def _get_system_prompt(self):
-        return """
-A user has just added new information from documents that need to be added to the knowledge base. 
-- Please follow the given output format. All sections are key-value pairs, where they keys are section names and the values are the contents of the section.
-"""
-    def _get_user_prompt(self):
-        return """
-{website_data}
----
-The above are the details obtained from a website or a document. First decide different sections to categorize these details into. Ensure that each section covers a separate set of details and that there are no overlaps between section names and details covered. Then rewrite the details separated into different sections where each section has the following format:
-
-<name of the section>: <one or more lines of section details>
-
-Exhaustively cover all information given above, especially covering all technical information.
-"""
+    
+class ConfigRep(PbyCRepresentation):
+    def _get_initial_values(self):
+        return Representation(
+            name="config",
+            text="{\"KUSTO_CLUSTER_URL\":\"\",\"KUSTO_DATABASE_NAME\":\"\",\"SERVICE_CLIENT_ID\":\"\",\"SERVICE_CLIENT_SECRET\":\"\",\"TENANT_ID\":\"\"}",
+            type="json"
+        )
 
 class OutputBot(AzureChatOpenAITool):
     def _get_system_prompt(self):
         return """
-You are a bot designed to develop a KQL expert chatbot which has a schema [SCHEMA]. 
+You are a KQL expert that can write queries based on tables schemas present in schema [SCHEMA] and can display the current configuration present in config [CONFIG]. 
 
 The schema is a set of key-value pairs, where the keys are table names (which you can think of as KQL tables), values are schema of that table. We want the schema section names to be distinct from each other. 
+
+The config is a json string with following property keys: KUSTO_CLUSTER_URL, KUSTO_DATABASE_NAME, SERVICE_CLIENT_ID, SERVICE_CLIENT_SECRET, TENANT_ID. We do not want to store any other property key in config.
 
 Always return the updated values by logically combining information from the user's input with the existing information to the current values. Only exclude information already given to you in the current values when the user specifically instructs to do so.
 """
     def _get_user_prompt(self):
         return """
-The user wants to interact with the KQL expert chatbot which has the schema [SCHEMA]. 
+The user wants to interact with the KQL expert chatbot which has the schema [SCHEMA] and config [CONFIG]. 
 
 To process a user utterance [U], respond to the user based on conversational history of utterances from the user,  using information only in [SCHEMA].
 
@@ -184,6 +191,9 @@ The chatbot definition is as follows:
 
 [SCHEMA]
 {SCHEMA}
+
+[CONFIG]
+{CONFIG}
 
 The following is the chat history. Messages from the bot are denoted by 'Bot:' and messages from the user are denoted by 'User:'. Based on the user's last input, please respond as described below.
 
@@ -198,6 +208,8 @@ Based on the user utterance and context, generate the following:
 
 If a user utterance is not supported by the schemas present in [SCHEMA], respond back saying that you are unable to process the utterance and inform them about the kind of user utterances you are able to process.
 
+If user utterance is to display the config, respond back by providing the [CONFIG] value. Please make sure that you mask or not display the service client secret.
+
 Based on the above chatbot definition and the user's input, output the response to include the current state of the chatbot. Please print the output in the below format. Always print the [Response] section in the output without fail.
 
 [Response]
@@ -209,27 +221,29 @@ Based on the above chatbot definition and the user's input, output the response 
 class CommandChooser(AzureChatOpenAITool):
     def _get_system_prompt(self):
         return """
-You are a bot designed to develop a KQL expert chatbot which has a schema [SCHEMA]. 
+You are a KQL expert that can write queries based on tables schemas present in schema [SCHEMA] and can display the current configuration present in config [CONFIG]. 
 
 The schema is a set of key-value pairs, where the keys are table names (which you can think of as KQL tables), values are schema of that table. We want the schema section names to be distinct from each other. 
 
+The config is a json string with following property keys: KUSTO_CLUSTER_URL, KUSTO_DATABASE_NAME, SERVICE_CLIENT_ID, SERVICE_CLIENT_SECRET, TENANT_ID. We do not want to store any other property key in config.
+
 Always return the updated values by logically combining information from the user's input with the existing information to the current values. Only exclude information already given to you in the current values when the user specifically instructs to do so.
-    """
+"""
 
     def _get_user_prompt(self):
         return """
 A user has given the following instruction to change the logic of the chatbot. To process a user utterance [U] first decide: 
 
-Does the utterance require us to update SCHEMA? If yes, then invoke “Update SCHEMA (defined below) with the part [U-SCHEMA] of the utterance [U] that is relevant to updating the [SCHEMA]. 
+Does the utterance require us to update config or configuration? If yes, then invoke “Update CONFIG (defined below) with the part [U-CONFIG] of the utterance [U] that is relevant to updating the [CONFIG]. 
 
-“Update SCHEMA”, with the current [SCHEMA] and part of the utterance [U-SCHEMA] is done as follows: Split the utterance [U-SCHEMA]  into sentences. For each sentence [S], if [S] corresponds to a section that is already in the [SCHEMA], merely update the value corresponding to that section with the utterance. Otherwise, choose a new section name [N], and add the sentence [S] in the value corresponding to that section. 
+“Update CONFIG", with part of the utterance [U-CONFIG] is done as follows: remove the [SCHEMA] section. Split the utterance [U-CONFIG]  into sentences. For each sentence [S], if [S] corresponds to setting the kusto cluster url then update KUSTO_CLUSTER_URL property in [CONFIG], if [S] corresponds to setting the database name then update KUSTO_DATABASE_NAME property in [CONFIG], if [S] corresponds to setting the service client id then update SERVICE_CLIENT_ID property in [CONFIG], if [S] corresponds to setting the tenant id then update TENANT_ID property in [CONFIG], if [S] corresponds to setting the service client secrete then update SERVICE_CLIENT_SECRET property in [CONFIG].
 
-In addition, if the user asks you to show the contents of the [SCHEMA] oblige them. 
+If user asks to display current config. Display current [CONFIG].
 
 If the user asks any thing else other than the above mentioned kind of utterances, respond back saying that you are unable to process the utterance, and inform them about the kind of user utterances you are able to process.  
 
-The current value of the knowledge base, [SCHEMA] is below. Modify the below [SCHEMA] to include changes if "Update SCHEMA" is required. If no changes are required, please return the current value of [SCHEMA] without any change.
-{SCHEMA}
+The current value of the config, [CONFIG] is below. Modify the below [CONFIG] to include changes if "Update CONFIG" is required. Make sure that the entire json is written in a single line. If no changes are required, please return the current value of [SCHEMA] without any change. Also make sure not to assume values for any of the properties whose values are not provided by user.
+{CONFIG}
 
 Please ensure to retain all the information in the above values, while only making modifications and additions to incorporate the user's input. Only exclude contents from the current values if the user specifically instructs to.
 The user's instruction is: {user_input}
@@ -238,6 +252,6 @@ Based on the above description and the user's instruction, output the updated va
 
 summary: <one-line summary of changes>
 
-[SCHEMA]
-<contents of schema>
+[CONFIG]
+<contents of config>
     """
