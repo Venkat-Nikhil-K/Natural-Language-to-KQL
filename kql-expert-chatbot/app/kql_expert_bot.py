@@ -247,26 +247,24 @@ You will facilitate the user's interaction with the chatbot. Please ensure to al
         return """
 A user has given the following instruction to change the logic of the chatbot. To process a user utterance [U] first decide: 
 
-Does the utterance require us to update TableSchema? If yes, then invoke “Update TableSchema (defined below) with the part [U-TableSchema] of the utterance [U] that is relevant to updating the [TableSchema]. 
+Does the utterance require us to update TableSchema? If yes, then invoke “Update TableSchema” (defined below) with the part [U-TableSchema] of the utterance [U] that is relevant to updating the [TableSchema]. 
 
 Does the utterance require us to update Configuration? If yes, then invoke “Update Configuration (defined below) with the part [U-Configuration] of the utterance [U] that is relevant to updating the [Configuration]. 
 
-Note that you can decide to invoke none or one of the updates  “Update KB” and “Update Note that you can decide to invoke none, one or more of the updates  “Update KB”, “Update Logic” and “Update Variables”.
+Note that you can decide to invoke none or one of the updates “Update TableSchema” and “Update Configuration”.
 
 “Update TableSchema”, with the current [TableSchema] and part of the utterance [U-TableSchema] is done as follows: Split the utterance [U-TableSchema]  into sentences. For each sentence [S], if [S] corresponds to a section that is already in the [TableSchema], merely update the value corresponding to that section with the utterance. Otherwise, choose a new section name [N], and add the sentence [S] in the value corresponding to that section.     
 
-“Update Configuration” with the current set of Configuration [Configuration] and part of the utterance [U-Configuration] is done as follows. Split the utterance [U-Configuration] into sentences.  
-
-For each sentence [S], if [S] corresponds to config [C] that is a part of [Configuration], then update its value.  
+“Update Configuration” with the current set of Configuration [Configuration] and part of the utterance [U-Configuration] is done as follows. Split the utterance [U-Configuration] into sentences. For each sentence [S], if [S] corresponds to config [C] that is a part of [Configuration], then update its value.  
 
 In addition, if the user asks you to show the contents of the [TableSchema] oblige them. 
 
 If the user asks any thing else other than the above mentioned kind of utterances, respond back saying that you are unable to process the utterance, and inform them about the kind of user utterances you are able to process.  
 
-The current value of the knowledge base, [TableSchema] is below. Modify the below [TableSchema] to include changes if "Update TableSchema" is required. If no changes are required, please return the current value of [TableSchema] without any change.
+The current value of the TableSchema, [TableSchema] is below. Modify the below [TableSchema] to include changes if "Update TableSchema" is required. If no changes are required, please return the current value of [TableSchema] without any change.
 {TableSchema}
 
-The current value of the knowledge base, [Configuration] is below. Modify the below [Configuration] to include changes if "Update Configuration" is required. If no changes are required, please return the current value of [Configuration] without any change.
+The current value of the Configuration, [Configuration] is below. Modify the below [Configuration] to include changes if "Update Configuration" is required. If no changes are required, please return the current value of [Configuration] without any change.
 {Configuration}
 
 Please ensure to retain all the information in the above values, while only making modifications and additions to incorporate the user's input. Only exclude contents from the current values if the user specifically instructs to.
