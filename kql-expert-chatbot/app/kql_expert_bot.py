@@ -75,7 +75,6 @@ class KqlExpertBotTool(PbyCEngine):
             for row in response.primary_results[0]:
                 tables.append(row["TableName"])
 
-            print("#################Tables loaded##############")
             print(f"Tables: {tables}")
 
             for table in tables:
@@ -179,6 +178,8 @@ The schema is a set of key-value pairs, where the keys are table names (which yo
 
 The config is a json string with following property keys: KUSTO_CLUSTER_URL, KUSTO_DATABASE_NAME, SERVICE_CLIENT_ID, SERVICE_CLIENT_SECRET, TENANT_ID. We do not want to store any other property key in config.
 
+Always prefer to write queries using join operator instead of writing subqueries.
+
 Always return the updated values by logically combining information from the user's input with the existing information to the current values. Only exclude information already given to you in the current values when the user specifically instructs to do so.
 """
     def _get_user_prompt(self):
@@ -205,6 +206,8 @@ The user's last input is: {user_input}
 Based on the user utterance and context, generate the following: 
 
 1. Response to be given to the user.
+
+Always prefer to write queries using join operator instead of writing subqueries.
 
 If a user utterance is not supported by the schemas present in [SCHEMA], respond back saying that you are unable to process the utterance and inform them about the kind of user utterances you are able to process.
 
